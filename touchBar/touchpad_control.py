@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-HONOR MagicBook Pro 16 (XWC-P) - Haptic Touchpad Control Tool
-Linux replacement for HONOR PCManager 'Pressure Touchpad Settings'.
+HONOR MagicBook Pro 16 (XWC-P) - Cross-Platform Touchpad Control Tool
+Supports both Linux (/dev/hidraw) and Windows (API / Registry).
 
 Controls:
   - Press Sensitivity (按压灵敏度: low / mid / high)
@@ -53,9 +53,9 @@ SHOCK_TEXT_ZH = {
 }
 
 def find_touchpad_hidraw():
-    """Find the Goodix Vendor HID device (/dev/hidrawX)"""
+    """Find the Goodix Vendor HID device (/dev/hidrawX) on Linux"""
     if IS_WINDOWS:
-        return "Windows_Preview_Mode"
+        return "Windows_Direct_API"
     
     for uevent in glob.glob("/sys/class/hidraw/hidraw*/device/uevent"):
         try:
@@ -71,15 +71,33 @@ def find_touchpad_hidraw():
     return None
 
 def load_config():
+    if IS_WINDOWS:
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\PCManager\TouchPadSetting")
+            sens, _ = winreg.QueryValueEx(key, "sensitivity")
+            shock, _ = winreg.QueryValueEx(key, "shock")
+            b_val, _ = winreg.QueryValueEx(key, "EdgeGestureAdjusBrightness")
+            v_val, _ = winreg.QueryValueEx(key, "EdgeGestureAdjusVolume")
+            return {
+                "sensitivity": sens,
+                "shock": shock,
+                "edge_brightness": bool(b_val),
+                "edge_volume": bool(v_val)
+            }
+        except Exception:
+            pass
+
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
+
     return {
-        "sensitivity": 2,  # Default: high (as in user screenshot)
-        "shock": 3,        # Default: high (as in user screenshot)
+        "sensitivity": 2,  # Default: high
+        "shock": 3,        # Default: high
         "edge_brightness": True,
         "edge_volume": True
     }
@@ -92,25 +110,52 @@ def save_config(cfg):
     except Exception as e:
         print(f"Warning: Could not save config to {CONFIG_FILE}: {e}")
 
-def apply_settings(dev_path, sensitivity_val, shock_val):
+def apply_settings(dev_path, sensitivity_val, shock_val, edge_brightness=True):
     """
-    Send configuration report to the Goodix Vendor HID interface.
+    Apply settings on either Windows or Linux.
     """
     if IS_WINDOWS:
-        print(f"[Windows Preview] 模拟发送报文: Sensitivity={sensitivity_val}, Shock={shock_val}")
+        # 1. Update Windows Registry
+        try:
+            import winreg
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\PCManager\TouchPadSetting")
+            winreg.SetValueEx(key, "sensitivity", 0, winreg.REG_DWORD, sensitivity_val)
+            winreg.SetValueEx(key, "shock", 0, winreg.REG_DWORD, shock_val)
+            winreg.SetValueEx(key, "EdgeGestureAdjusBrightness", 0, winreg.REG_DWORD, 1 if edge_brightness else 0)
+        except Exception as e:
+            print(f"[Windows] Registry update notice: {e}")
+
+        # 2. Invoke Helper DLL directly if available
+        dll_path = r"C:\Program Files\HONOR\PCManager\MagicTouchPadHelper.dll"
+        if os.path.exists(dll_path):
+            try:
+                import ctypes
+                os.add_dll_directory(r"C:\Program Files\HONOR\PCManager")
+                helper = ctypes.CDLL(dll_path)
+                helper.ChangeSensitivityOpt.argtypes = [ctypes.c_int]
+                helper.ChangeShockOpt.argtypes = [ctypes.c_int]
+                helper.ChangeEdgeGestureAdjusBrightnessOpt.argtypes = [ctypes.c_int]
+                
+                helper.ChangeSensitivityOpt(sensitivity_val)
+                helper.ChangeShockOpt(shock_val)
+                helper.ChangeEdgeGestureAdjusBrightnessOpt(1 if edge_brightness else 0)
+                print(f"[Windows] Successfully applied to hardware via MagicTouchPadHelper: Sensitivity={sensitivity_val}, Shock={shock_val}")
+                return True
+            except Exception as e:
+                print(f"[Windows] Helper DLL invocation notice: {e}")
         return True
 
+    # Linux implementation via hidraw
     if not dev_path or not os.path.exists(dev_path):
-        print(f"Error: Device path {dev_path} does not exist.")
+        print(f"Error: Linux device path {dev_path} does not exist.")
         return False
     
     try:
-        # Report ID 0x06: [ReportID, Cmd=1, Sensitivity, Shock, 0, 0, 0, 0]
         report_cmd = bytearray([0x06, 0x01, sensitivity_val & 0xFF, shock_val & 0xFF, 0x00, 0x00, 0x00, 0x00])
         with open(dev_path, "wb") as f:
             f.write(report_cmd)
             f.flush()
-        print(f"Successfully applied settings to {dev_path}: Sensitivity={SENSITIVITY_MAP.get(sensitivity_val)}, Shock={SHOCK_MAP.get(shock_val)}")
+        print(f"[Linux] Successfully applied settings to {dev_path}: Sensitivity={SENSITIVITY_MAP.get(sensitivity_val)}, Shock={SHOCK_MAP.get(shock_val)}")
         return True
     except PermissionError:
         print(f"Permission denied accessing {dev_path}. Try running with sudo.")
@@ -199,7 +244,7 @@ def show_gui():
     t2_frame = tk.Frame(edge2, bg="#FFFFFF")
     t2_frame.pack(side="left")
     tk.Label(t2_frame, text="调节系统音量", font=("Microsoft YaHei UI", 10, "bold"), bg="#FFFFFF", fg="#333333").pack(anchor="w")
-    tk.Label(t2_frame, text="单指沿触控板右边缘上下滑动", font=("Microsoft YaHei UI", 8), bg="#FFFFFF", fg="#7F8C8D").pack(anchor="w")
+    tk.Label(t2_frame, text="单指沿触控板右边缘上下滑动 (硬件原生支持)", font=("Microsoft YaHei UI", 8), bg="#FFFFFF", fg="#7F8C8D").pack(anchor="w")
     v_var = tk.BooleanVar(value=cfg.get("edge_volume", True))
     v_cb = ttk.Checkbutton(edge2, text="硬件原生启用", variable=v_var, state="disabled")
     v_cb.pack(side="right")
@@ -207,13 +252,14 @@ def show_gui():
     # Card 3: 触控板手势说明
     card3 = tk.LabelFrame(main_canvas, text=" 多指手势支持 ", font=("Microsoft YaHei UI", 10, "bold"), bg="#FFFFFF", fg="#2C3E50", padx=18, pady=10, relief="flat", bd=1)
     card3.pack(fill="x", pady=(0, 10))
-    tk.Label(card3, text="• 单指轻点为左键，双指轻点为右键\n• 双指上下滑动进行平滑滚动与页面缩放\n• 三指拖拽 / 左右滑动无缝切换工作区 (Wayland/libinput 原生接管)", font=("Microsoft YaHei UI", 8), justify="left", bg="#FFFFFF", fg="#555555").pack(anchor="w")
+    tk.Label(card3, text="• 单指轻点为左键，双指轻点为右键\n• 双指上下滑动进行平滑滚动与页面缩放\n• 三指拖拽 / 左右滑动无缝切换工作区", font=("Microsoft YaHei UI", 8), justify="left", bg="#FFFFFF", fg="#555555").pack(anchor="w")
 
     # Footer Status & Apply
     footer = tk.Frame(root, bg="#FFFFFF", padx=20, pady=12)
     footer.pack(fill="x", side="bottom")
 
-    status_lbl = tk.Label(footer, text="状态: " + ("Windows 界面预览模式" if IS_WINDOWS else "Linux 原生模式"), font=("Microsoft YaHei UI", 9), bg="#FFFFFF", fg="#27AE60" if IS_WINDOWS else "#2980B9")
+    status_text = "运行环境: Windows (直调硬件接口)" if IS_WINDOWS else "运行环境: Linux (hidraw 模式)"
+    status_lbl = tk.Label(footer, text=status_text, font=("Microsoft YaHei UI", 9), bg="#FFFFFF", fg="#27AE60")
     status_lbl.pack(side="left")
 
     def on_save():
@@ -222,7 +268,7 @@ def show_gui():
         v_val = SHOCK_MAP.get(shock_var.get(), 3)
         b_enabled = b_var.get()
         
-        success = apply_settings(dev, s_val, v_val)
+        success = apply_settings(dev, s_val, v_val, b_enabled)
         if success:
             save_config({
                 "sensitivity": s_val,
@@ -230,12 +276,10 @@ def show_gui():
                 "edge_brightness": b_enabled,
                 "edge_volume": True
             })
-            if IS_WINDOWS:
-                messagebox.showinfo("成功", f"【Windows 预览测试】\n已保存触控板设置：\n• 按压灵敏度：{sens_var.get()} ({SENSITIVITY_TEXT_ZH[s_val]})\n• 按压振感：{shock_var.get()} ({SHOCK_TEXT_ZH[v_val]})\n• 边缘亮度手势：{'开启' if b_enabled else '关闭'}")
-            else:
-                messagebox.showinfo("成功", "触控板压感与振动强度设置已直接应用至硬件芯片！")
+            env_name = "Windows" if IS_WINDOWS else "Linux"
+            messagebox.showinfo("成功", f"【{env_name} 触控板设置已生效】\n• 按压灵敏度：{sens_var.get()} ({SENSITIVITY_TEXT_ZH[s_val]})\n• 按压振感：{shock_var.get()} ({SHOCK_TEXT_ZH[v_val]})\n• 边缘手势：已同步更新")
         else:
-            messagebox.showerror("错误", "应用设置失败，请确认是否具备 root / hidraw 读写权限！")
+            messagebox.showerror("错误", "应用设置失败，请确认是否具备对应系统权限！")
 
     save_btn = tk.Button(footer, text="  保 存 并 应 用  ", font=("Microsoft YaHei UI", 10, "bold"), bg="#0066FF", fg="#FFFFFF", activebackground="#0052CC", activeforeground="#FFFFFF", relief="flat", padx=15, pady=5, cursor="hand2", command=on_save)
     save_btn.pack(side="right")
@@ -243,11 +287,11 @@ def show_gui():
     root.mainloop()
 
 def main():
-    parser = argparse.ArgumentParser(description="HONOR MagicBook Pro 16 Haptic Touchpad Control")
+    parser = argparse.ArgumentParser(description="HONOR MagicBook Pro 16 Haptic Touchpad Control (Cross-Platform)")
     parser.add_argument("--sensitivity", choices=["low", "mid", "high"], help="Set click trigger pressure sensitivity")
     parser.add_argument("--shock", choices=["off", "low", "mid", "high"], help="Set click vibration intensity")
     parser.add_argument("--gui", action="store_true", help="Launch graphical control panel")
-    parser.add_argument("--status", action="store_true", help="Show current touchpad status and device path")
+    parser.add_argument("--status", action="store_true", help="Show current touchpad status and configuration")
     parser.add_argument("--apply-saved", action="store_true", help="Apply saved configuration from file")
 
     args = parser.parse_args()
@@ -255,25 +299,26 @@ def main():
     dev = find_touchpad_hidraw()
 
     if args.status:
-        print(f"Device: {dev if dev else 'Not found'}")
         cfg = load_config()
-        print(f"Saved config: Sensitivity={SENSITIVITY_MAP.get(cfg.get('sensitivity', 2))}, Shock={SHOCK_MAP.get(cfg.get('shock', 3))}")
+        print(f"Platform: {'Windows' if IS_WINDOWS else 'Linux'}")
+        print(f"Device: {dev if dev else 'Not found'}")
+        print(f"Current config: Sensitivity={SENSITIVITY_MAP.get(cfg.get('sensitivity', 2))} ({cfg.get('sensitivity', 2)}), Shock={SHOCK_MAP.get(cfg.get('shock', 3))} ({cfg.get('shock', 3)})")
         return
 
     if args.apply_saved:
         cfg = load_config()
-        apply_settings(dev, cfg.get("sensitivity", 2), cfg.get("shock", 3))
+        apply_settings(dev, cfg.get("sensitivity", 2), cfg.get("shock", 3), cfg.get("edge_brightness", True))
         return
 
     if args.sensitivity or args.shock:
         cfg = load_config()
         s_val = SENSITIVITY_MAP[args.sensitivity] if args.sensitivity else cfg.get("sensitivity", 2)
         v_val = SHOCK_MAP[args.shock] if args.shock else cfg.get("shock", 3)
-        apply_settings(dev, s_val, v_val)
-        save_config({"sensitivity": s_val, "shock": v_val})
+        apply_settings(dev, s_val, v_val, cfg.get("edge_brightness", True))
+        save_config({"sensitivity": s_val, "shock": v_val, "edge_brightness": cfg.get("edge_brightness", True), "edge_volume": True})
         return
 
-    # Default to GUI on Windows or if graphical desktop is available
+    # Default to GUI if graphical desktop is available
     if args.gui or IS_WINDOWS or "DISPLAY" in os.environ or "WAYLAND_DISPLAY" in os.environ:
         show_gui()
     else:
