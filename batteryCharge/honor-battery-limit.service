@@ -1,0 +1,10 @@
+[Unit]
+Description=Set HONOR Battery Charge Limit to 80% on Boot
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/honor-battery-limit 80
+
+[Install]
+WantedBy=multi-user.target

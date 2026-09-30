@@ -1,0 +1,29 @@
+--- a/ssdt-touchpad-original.asl	2026-06-27 21:01:33.902221801 +0800
++++ b/ssdt-touchpad.asl	2026-06-27 21:01:33.904221826 +0800
+@@ -1,4 +1,4 @@
+-DefinitionBlock ("", "SSDT", 2, "HONOR", "I2C_DEVT", 0x00001000)
++DefinitionBlock ("", "SSDT", 2, "HONOR", "I2CDEVC", 0x00001000)
+ {
+     External (_SB_.GGOV, MethodObj)    // 1 Arguments
+     External (_SB_.GRXE, MethodObj)    // 2 Arguments
+@@ -584,7 +584,11 @@
+                     }
+             })
+             CreateWordField (SBGF, 0x17, INT1)
+-            INT1 = GNUM (0x001A088A)
++            // [FIX] This used to be a module-level "INT1 = GNUM (0x001A088A)".
++            // At table-load time GNUM/GINF index the GPCS package before the
++            // namespace is ready -> AE_AML_INTERNAL -> the whole table is rolled
++            // back. Moved into _CRS below (runtime), where the namespace is ready
++            // and GNUM works. TPD0 is left entirely untouched (OEM dynamic calc).
+             Method (_STA, 0, NotSerialized)  // _STA: Status
+             {
+                 If ((TPDT == One))
+@@ -599,6 +603,7 @@
+ 
+             Method (_CRS, 0, NotSerialized)  // _CRS: Current Resource Settings
+             {
++                INT1 = GNUM (0x001A088A)   // [FIX] runtime computation of NFC interrupt; no longer at table load
+                 Return (ConcatenateResTemplate (SBFU, SBGF))
+             }
+         }
