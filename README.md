@@ -106,3 +106,17 @@ honor-touchpad --shock high
 # 查看当前触控板工作状态
 honor-touchpad --status
 ```
+
+---
+
+## 🪟 Windows 平台使用方法
+
+`touchpad_control.py` 经过特别优化，现已**完整支持 Windows 平台直接运行**：
+
+* **免装电脑管家**：无需在后台常驻体积庞大、包含众多守护进程的官方电脑管家。
+* **物理硬件直连**：双击项目根目录的 **`运行触控板设置.bat`**，即可弹出原生设置面板。拖动滑块或选择档位保存后，会立即同步硬件物理触发克数与马达振感。
+* **命令行调节**：
+  ```cmd
+  python touchBar/touchpad_control.py --sensitivity high --shock high
+  ```
+

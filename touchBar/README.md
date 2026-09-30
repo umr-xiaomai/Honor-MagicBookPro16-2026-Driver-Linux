@@ -33,3 +33,15 @@ honor-touchpad --shock high
 # 查看当前状态与设备节点
 honor-touchpad --status
 ```
+
+## Windows 平台使用方法
+
+本工具支持 **Windows / Linux 双平台原生硬件控制**。在 Windows 下可作为免安装、不占后台的轻量设置器直接使用：
+
+* 双击项目根目录的 `运行触控板设置.bat` 即可启动图形控制面板。
+* 或在终端中执行：
+  ```cmd
+  python touchBar/touchpad_control.py --gui
+  ```
+* 调整设置后会直接通过底层硬件接口与注册表通道应用，实时改变触控板物理按压触发力度与振动力度，无需后台常驻官方电脑管家。
+
