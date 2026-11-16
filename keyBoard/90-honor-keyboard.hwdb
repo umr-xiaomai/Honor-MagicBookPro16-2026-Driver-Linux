@@ -1,9 +1,8 @@
-# HONOR MagicBook Pro 16 2026 Keyboard Scancode mappings
-# Matches HONOR laptops internal keyboard
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHONOR:pn*XWC-P*:pvr*
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHONOR:pn*MagicBook*:pvr*
- KEYBOARD_KEY_81=f20                  # Microphone Mute toggle
+# HONOR MagicBook Pro 16 2026 keyboard scancodes.
+# Match only XWC-P; the scancodes still depend on firmware.
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHONOR:pnXWC-P:pvr*
+ KEYBOARD_KEY_81=f20
  KEYBOARD_KEY_f7=f20
- KEYBOARD_KEY_ce=camera               # Camera switch
- KEYBOARD_KEY_cf=f21                  # Fn Lock
- KEYBOARD_KEY_ea=prog1                # HONOR Control Center / Performance Toggle
+ KEYBOARD_KEY_ce=camera
+ KEYBOARD_KEY_cf=f21
+ KEYBOARD_KEY_ea=prog1

@@ -1,10 +1,16 @@
 [Unit]
-Description=Set HONOR Battery Charge Limit to 80% on Boot
-After=multi-user.target
+Description=Set HONOR battery charge limit through kernel sysfs
+After=systemd-modules-load.service
+StartLimitIntervalSec=60
+StartLimitBurst=6
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/honor-battery-limit 80
+Environment=CHARGE_LIMIT=80
+EnvironmentFile=-/etc/default/honor-battery-limit
+ExecStart=/usr/local/bin/honor-battery-limit ${CHARGE_LIMIT}
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target

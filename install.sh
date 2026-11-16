@@ -1,141 +1,87 @@
 #!/usr/bin/env bash
-#
-# Unified One-Click Linux Driver & Fix Installer
-# Target Machine: HONOR MagicBook Pro 16 2026 (XWC-P)
-#
+# Install detected functionality. Boot changes are explicit module options.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MODULES=(touchBar keyBoard audioCodec fingerPrint batteryCharge)
+selected=()
+module_args=()
+dry_run=false
+diagnose=false
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m'
+usage() {
+    cat <<'EOF'
+Usage: bash install.sh [--dry-run] [--module NAME ...] [-- MODULE_OPTIONS]
+       bash install.sh --diagnose [-- DIAGNOSTIC_OPTIONS]
 
-echo -e "${BLUE}${BOLD}"
-echo "============================================================"
-echo "    HONOR MagicBook Pro 16 (XWC-P) Linux Driver Suite       "
-echo "               One-Click Setup Installer                    "
-echo "============================================================"
-echo -e "${NC}"
+Modules: touchBar keyBoard audioCodec fingerPrint batteryCharge
+With no --module, run all modules with their conservative defaults.
+Use -- before options for exactly one selected module, for example:
+  sudo bash install.sh --module touchBar -- --acpi-dir /path/to/generated
+  sudo bash install.sh --module keyBoard -- --enable-dumbkbd
+  bash install.sh --diagnose -- --json
 
-# 1. Root check
-if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}[ERROR] This installer must be run as root.${NC}" >&2
-    echo "Please execute: sudo ./install.sh" >&2
-    exit 1
+--dry-run   Show the plan without root privileges or system changes.
+--diagnose  Collect a read-only Linux hardware report; no installation.
+--help      Show this help.
+EOF
+}
+
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+while (($#)); do
+    case "$1" in
+        --help|-h) usage; exit 0 ;;
+        --dry-run) dry_run=true; shift ;;
+        --diagnose) diagnose=true; shift ;;
+        --module)
+            (($# >= 2)) || die '--module requires a name'
+            case "$2" in
+                touchBar|keyBoard|audioCodec|fingerPrint|batteryCharge) ;;
+                *) die "Unknown module: $2" ;;
+            esac
+            for name in "${selected[@]}"; do
+                [[ "$name" != "$2" ]] || die "Duplicate module: $2"
+            done
+            selected+=("$2"); shift 2 ;;
+        --) shift; module_args=("$@"); break ;;
+        *) die "Unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+if $diagnose; then
+    ((${#selected[@]} == 0)) || die '--diagnose cannot be combined with --module'
+    $dry_run && die '--diagnose is already read-only; omit --dry-run'
+    command -v python3 >/dev/null 2>&1 || die 'python3 is required for diagnostics'
+    exec python3 "$ROOT_DIR/tools/honor_diagnose.py" "${module_args[@]}"
 fi
 
-# 2. Secure Boot Check
-echo -e "${BOLD}[Step 1/4] Checking UEFI Secure Boot Status...${NC}"
-if command -v mokutil >/dev/null 2>&1; then
-    if mokutil --sb-state 2>/dev/null | grep -iq "SecureBoot enabled"; then
-        echo -e "${RED}${BOLD}[CRITICAL WARNING]${NC}"
-        echo -e "${YELLOW}Secure Boot is currently ${RED}ENABLED${YELLOW}.${NC}"
-        echo -e "${YELLOW}Linux Kernel Lockdown will SILENTLY BLOCK initrd ACPI table overrides,${NC}"
-        echo -e "${YELLOW}causing the touchpad fix to fail to load!${NC}"
-        echo -e "Please reboot into BIOS (press F2 upon power on) and set ${BOLD}Secure Boot -> Disabled${NC}."
-        echo ""
-        read -p "Do you want to continue anyway? [y/N]: " -r choice
-        case "$choice" in
-            [yY][eE][sS]|[yY]) echo "Continuing installation...";;
-            *) echo "Aborted. Please disable Secure Boot first."; exit 1;;
-        esac
+((${#module_args[@]} == 0 || ${#selected[@]} == 1)) || die 'Module options require exactly one --module'
+if ((${#selected[@]} == 0)); then selected=("${MODULES[@]}"); fi
+
+# Plans also work on developer workstations; installation requires real Linux.
+if ! $dry_run; then
+    [[ "$(uname -s)" == Linux ]] || die 'Installation requires a booted Linux system'
+    [[ "$(id -u)" == 0 ]] || die 'Run installation with sudo; --dry-run needs no root'
+    [[ -r /sys/class/dmi/id/sys_vendor && -r /sys/class/dmi/id/product_name ]] || die 'DMI information unavailable'
+    vendor="$(cat /sys/class/dmi/id/sys_vendor)"
+    product="$(cat /sys/class/dmi/id/product_name)"
+    [[ "${vendor^^}" == *HONOR* && "$product" == XWC-P ]] || die "Unsupported hardware: $vendor $product (expected HONOR XWC-P)"
+fi
+
+printf 'HONOR XWC-P setup%s\n' "$(if $dry_run; then printf ' (dry run)'; fi)"
+printf 'Boot changes require explicit module options. No packages are installed automatically.\n'
+for module in "${selected[@]}"; do
+    script="$ROOT_DIR/$module/install.sh"
+    [[ -f "$script" ]] || die "Missing installer: $script"
+    args=()
+    if $dry_run; then args+=(--dry-run); fi
+    printf '\n[%s]\n' "$module"
+    if bash "$script" "${args[@]}" "${module_args[@]}"; then
+        printf '[%s] completed; review module output for unavailable hardware/functions.\n' "$module"
     else
-        echo -e "${GREEN}✓ Secure Boot is disabled. ACPI table override will load properly.${NC}"
+        result=$?
+        printf '[%s] failed (exit %s). Previous modules may already be installed.\n' "$module" "$result" >&2
+        exit "$result"
     fi
-else
-    echo "Note: 'mokutil' not found, skipping Secure Boot check. Ensure Secure Boot is Disabled in BIOS."
-fi
-
-# 3. Hardware check
-echo -e "\n${BOLD}[Step 2/4] Verifying Hardware Model...${NC}"
-if [ -f /sys/class/dmi/id/product_name ]; then
-    PROD=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
-    echo "-> DMI Product Name: $PROD"
-    if [[ "$PROD" != *"XWC-P"* && "$PROD" != *"MagicBook"* ]]; then
-        echo -e "${YELLOW}Notice: Device $PROD is not strictly 'XWC-P', but fixes are likely compatible with 2026 MagicBook AI models.${NC}"
-    else
-        echo -e "${GREEN}✓ Verified HONOR MagicBook Pro 16 platform.${NC}"
-    fi
-fi
-
-# 4. Install Submodules
-echo -e "\n${BOLD}[Step 3/4] Installing Device Modules...${NC}"
-
-# Module 1: touchBar (Pressure Touchpad & Gestures)
-if [ -f "$ROOT_DIR/touchBar/install.sh" ]; then
-    echo -e "\n${BLUE}--> Installing [touchBar] module...${NC}"
-    bash "$ROOT_DIR/touchBar/install.sh"
-fi
-
-# Module 2: keyBoard (Internal Keyboard & Fn Hotkeys)
-if [ -f "$ROOT_DIR/keyBoard/install.sh" ]; then
-    echo -e "\n${BLUE}--> Installing [keyBoard] module...${NC}"
-    bash "$ROOT_DIR/keyBoard/install.sh"
-fi
-
-# Module 3: audioCodec (ALC256 & Headphone mic)
-if [ -f "$ROOT_DIR/audioCodec/install.sh" ]; then
-    echo -e "\n${BLUE}--> Installing [audioCodec] module...${NC}"
-    bash "$ROOT_DIR/audioCodec/install.sh"
-fi
-
-# Module 4: fingerPrint (Goodix 27c6:6f94 permissions)
-if [ -f "$ROOT_DIR/fingerPrint/install.sh" ]; then
-    echo -e "\n${BLUE}--> Installing [fingerPrint] module...${NC}"
-    bash "$ROOT_DIR/fingerPrint/install.sh"
-fi
-
-# Module 5: batteryCharge (Battery Health Limit)
-if [ -f "$ROOT_DIR/batteryCharge/install.sh" ]; then
-    echo -e "\n${BLUE}--> Installing [batteryCharge] module...${NC}"
-    bash "$ROOT_DIR/batteryCharge/install.sh"
-fi
-
-# 5. Bootloader & Initramfs Regeneration
-echo -e "\n${BOLD}[Step 4/4] Updating Bootloader & Initramfs...${NC}"
-
-# Debian / Ubuntu
-if command -v update-grub >/dev/null 2>&1; then
-    echo "-> Running update-grub..."
-    update-grub || true
-elif command -v grub2-mkconfig >/dev/null 2>&1; then
-    echo "-> Running grub2-mkconfig..."
-    grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || \
-    grub2-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
-elif command -v grub-mkconfig >/dev/null 2>&1; then
-    echo "-> Running grub-mkconfig..."
-    grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
-fi
-
-# Initramfs
-if command -v update-initramfs >/dev/null 2>&1; then
-    echo "-> Running update-initramfs -u..."
-    update-initramfs -u || true
-elif command -v dracut >/dev/null 2>&1; then
-    echo "-> Regenerating initramfs with dracut..."
-    dracut --force || true
-elif command -v mkinitcpio >/dev/null 2>&1; then
-    echo "-> Regenerating initramfs with mkinitcpio..."
-    mkinitcpio -P || true
-fi
-
-echo -e "\n${GREEN}${BOLD}============================================================${NC}"
-echo -e "${GREEN}${BOLD}           All modules installed successfully!              ${NC}"
-echo -e "${GREEN}${BOLD}============================================================${NC}"
-echo ""
-echo -e "Next steps:"
-echo -e "  1. ${BOLD}Reboot your computer${NC} to apply ACPI table and kernel changes:"
-echo -e "     ${YELLOW}sudo reboot${NC}"
-echo ""
-echo -e "  2. After reboot, test the touchpad and adjust sensitivity:"
-echo -e "     ${YELLOW}honor-touchpad --gui${NC}      (Launch graphical settings panel)"
-echo -e "     ${YELLOW}honor-touchpad --status${NC}   (Verify device status)"
-echo ""
-echo -e "  3. Edge gestures:"
-echo -e "     • Right edge slide: System volume (Out of the box)"
-echo -e "     • Left edge slide: Screen brightness (HID-BPF enabled)"
-echo ""
+done
+printf '\nSetup finished. Use --diagnose to inspect actual device state.\n'

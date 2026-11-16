@@ -1,122 +1,116 @@
-# HONOR MagicBook Pro 16 2026 (XWC-P) Linux 驱动与功能适配套件
+# HONOR MagicBook Pro 16 2026（XWC-P）Linux 适配工具
 
-本仓库针对 **HONOR MagicBook Pro 16 2026 (代号 XWC-P，搭载 Intel Core Ultra / Panther Lake 平台)** 提供全套 Linux 硬件适配、补丁以及全域压感触控板的控制工具。
+面向 HONOR XWC-P，提供硬件诊断、按模块安装、固件 ACPI 修补和触控板设置工具。需要 Bash 和 Python **3.10+**。本仓库包含适配脚本和实验代码，并不包含全部硬件的 Linux 驱动。
 
----
+当前开发环境是这台机器的 Windows，已只读确认机型 **HONOR XWC-P、BIOS 1.12**，并检查实际驱动和电脑管家 DLL。Linux 安装路径以 **Fedora 44** 为重点，兼顾 Ubuntu/Debian、Arch 和 openSUSE；硬件是否正常仍需在目标 Linux 内验证。具体问题与证据见 [代码与 Windows 驱动分析](docs/driver-audit.md)。
 
-## 解决的核心问题
+## 先诊断，再按需启用
 
-1. **全域压感触控板（touchBar / touchPad）完全无法识别**：
-   - **原因**：BIOS 官方固件中的 `SSDT:I2C_DEVT` 表在 `Device(NFC0)` 处写了一行模块级执行语句 `INT1 = GNUM(0x001A088A)`。在 Linux 内核 ACPICA 加载时报 `AE_AML_INTERNAL` 严重错误并丢弃整张表，导致触控板从设备树中彻底消失。
-   - **解决**：通过注入早期 CPIO ACPI 表覆盖 (`acpi-touchpad-override.img`) 修复表加载，无需重编译内核。
-2. **触控板压感与振动强度调节（Linux 版电脑管家）**：
-   - 提供 `honor-touchpad`（命令行与 GUI 图形界面），向 `/dev/hidraw` 发送对应指令调节按压灵敏度与振感反馈。
-3. **边缘滑动手势**：
-   - 右边缘上下滑动：硬件 EC 原生拦截并映射为音量加减（开箱即用）。
-   - 左边缘上下滑动：通过内核 HID-BPF 将 `0x0E` 报文转换为标准屏幕亮度调节键。
-4. **内置键盘卡死/无响应（keyBoard）**：
-   - 自动添加 `i8042.dumbkbd=1` 内核启动参数，并配置 `90-honor-keyboard.hwdb` 修正麦克风静音键、摄像头键等 Fn 按键映射。
-5. **音频与耳麦自动切换（audioCodec）**：
-   - 配置 ALC256 编解码器引脚模型，修复耳机插拔自动静音及麦克风切换。
-6. **指纹识别权限（fingerPrint）**：
-   - 汇顶 Goodix `27c6:6f94` 传感器 udev 权限规则配置。
-7. **电池保养充电上限（batteryCharge）**：
-   - 支持将满电限制设为 80% 或 70%，保护电池健康。
-
----
-
-## 模块结构
-
-```text
-MagicBookPro16Driver/
-├── .gitignore                      # Git 忽略配置
-├── .gitattributes                 # 跨平台换行符与二进制配置 (强制 Linux LF)
-├── install.sh                     # 根目录一键自动化安装脚本
-├── README.md                      # 项目说明文档
-│
-├── touchBar/                      # 触控板核心模块
-│   ├── acpi-touchpad-override.img # 预编译的早期 CPIO ACPI 覆盖镜像
-│   ├── ssdt-touchpad.aml          # 修正后的 ACPI AML 字节码
-│   ├── ssdt-touchpad.asl          # ACPI 源码与修补补丁
-│   ├── honor-tops0102-edge.bpf.c  # 左边缘亮度手势 HID-BPF 源码
-│   ├── touchpad_control.py        # 压感与振动强度设置工具 (CLI & GUI)
-│   ├── install.sh                 # 触控板独立安装脚本
-│   └── README.md
-│
-├── keyBoard/                      # 键盘与按键映射模块
-│   ├── 90-honor-keyboard.hwdb     # Fn 键 udev 扫描码映射
-│   ├── install.sh                 # 键盘独立安装脚本 (配置 i8042.dumbkbd=1)
-│   └── README.md
-│
-├── audioCodec/                    # 声卡与耳麦适配模块
-│   ├── alsa-honor.conf            # ALC256 与 SOF 驱动选项
-│   ├── install.sh                 # 音频独立安装脚本
-│   └── README.md
-│
-├── fingerPrint/                   # 指纹识别适配模块
-│   ├── 70-goodix-fingerprint.rules# Goodix 27c6:6f94 权限规则
-│   ├── install.sh                 # 指纹独立安装脚本
-│   └── README.md
-│
-└── batteryCharge/                 # 电池充电保护模块
-    ├── honor-battery-limit.sh     # 充电阈值设置脚本 (70% / 80% / 100%)
-    ├── honor-battery-limit.service# 开机自启 systemd 服务
-    ├── install.sh                 # 电池独立安装脚本
-    └── README.md
-```
-
----
-
-## 一键安装步骤
-
-### ⚠️ 前置重要检查（必看）
-
-* **必须在 BIOS/UEFI 中关闭 Secure Boot（安全启动）**：
-  * 开机时狂按 `F2` 进入 BIOS。
-  * 将 `Secure Boot` 选项设置为 `Disabled`（关闭）。
-  * **原因**：Linux 在开启安全启动时会开启内核锁定模式（Lockdown），该模式会**直接静默拦截**从 initrd 加载任何自定义 ACPI 覆盖表，导致触控板补丁完全无法生效。
-
-### 运行一键安装
-
-进入当前仓库目录后，执行：
+在实际安装的 Linux 中运行，WSL 不能代替本机 Linux 硬件环境：
 
 ```bash
-sudo ./install.sh
-sudo reboot
+# 普通用户即可运行；--logs 可能需要 sudo 才能读取完整内核日志
+bash install.sh --diagnose -- --json
+sudo bash install.sh --diagnose -- --json --logs > honor-diagnose.json
+
+# 仅预览，任何模块均不修改系统
+bash install.sh --dry-run
+
+# 安装工具和匹配本机的规则，不自动注入 ACPI 或写入硬件参数
+sudo bash install.sh
 ```
 
-脚本会自动检测你的 Linux 发行版（Ubuntu/Debian、Fedora、Arch Linux、openSUSE），依次安装各设备模块，并重新生成 bootloader 与 initramfs。
+默认安装会安装触控板 CLI、限定设备的 udev 权限规则、XWC-P 键盘映射及电池 CLI/服务文件。音频模块只检查。默认不新增启动参数，不启用电池限制，不启用触控板自动应用服务，也不安装未经接入验证的 HID-BPF 程序。已有电池服务的启用状态会保留。
 
----
-
-## 触控板压感与设置
-
-系统重启后，即可使用自带的控制工具：
+安装器遇到失败会返回非零并停止，之前完成的模块可能已经安装；不会再把失败统一显示为“全部成功”。不自动安装软件包。实际写入要求 root 和匹配的机型，`--dry-run` 无需 root。
 
 ```bash
-# 打开图形控制面板 (类似 Windows 电脑管家)
-honor-touchpad --gui
+# 单独执行模块；-- 后的参数传给该模块
+sudo bash install.sh --module touchBar
+bash install.sh --module touchBar -- --help
+```
 
-# 或在命令行中调节触发力度 (low / mid / high)
-honor-touchpad --sensitivity high
+## 触控板完全不识别：固件 ACPI 修补
 
-# 调节马达振动力度 (off / low / mid / high)
-honor-touchpad --shock high
+原代码针对某个 BIOS 的 `I2C_DEVT` 表，将 NFC0 中过早执行的 `INT1 = GNUM(0x001A088A)` 移至 `_CRS`。这只适用于相同结构的固件；当前 BIOS 是否仍有此问题，需要结合 Linux 诊断日志判断。
 
-# 查看当前触控板工作状态
+**不要手动安装仓库内旧的 `.aml` / `.img`**：旧表改变了 OEM Table ID，不能作为原表升级，还可能造成重复命名空间。新的安装器只接受根据实际固件生成并校验的 bundle。
+
+Fedora 44 构建依赖：
+
+```bash
+sudo dnf install python3 acpica-tools cpio dracut
+```
+
+Ubuntu/Debian：`sudo apt install python3 acpica-tools cpio`。Arch：`sudo pacman -S python acpica cpio`。openSUSE：`sudo zypper install python3 acpica cpio dracut`。GUI 另外需要本发行版的 Tkinter 包，与 ACPI 修补无关。
+
+```bash
+# 自动读取当前 Linux 的 HONOR I2C_DEVT 表；构建前需确保输出目录不存在
+sudo bash touchBar/build.sh --output-dir /var/tmp/honor-touchpad-acpi
+
+# 查看生成的 ssdt-touchpad.dsl，再安装这个固件专用结果
+sudo bash install.sh --module touchBar -- --acpi-dir /var/tmp/honor-touchpad-acpi
+```
+
+构建只修改已知的 NFC0 语句位置，保留原表标识并递增 OEM revision；未知结构、编译失败、校验错误或固件不匹配都会停止。`iasl` 若无法推断跨表方法签名，可用多个 `--external-table` 提供当前固件的相关表，见 [触控板说明](touchBar/README.md)。升级 BIOS 后必须重新评估和构建。
+
+| 系统/启动方式 | ACPI 安装路径 | 键盘启动参数 |
+| --- | --- | --- |
+| Fedora 44 常规 dracut 系统 | dracut `acpi_override`，重建 initramfs，保留 BLS 格式 | grubby |
+| Ubuntu / Debian，GRUB | 追加独立早期 CPIO，运行 update-grub | 修改 GRUB 配置后 update-grub |
+| Arch，GRUB | 独立早期 CPIO，运行 grub-mkconfig | 修改 GRUB 配置后 grub-mkconfig |
+| openSUSE 常规 dracut 系统 | dracut `acpi_override` | grubby 或 grub2-mkconfig |
+| 自定义启动链、systemd-boot、UKI、不可变系统 | 需确认实际镜像生成工具；见模块说明，不宣称通用支持 | 需按实际启动管理器配置 |
+
+以上是代码支持的集成路径，**并非这些发行版均已通过本机实测**。ACPI 安装会检查当前内核的表升级支持及 lockdown/Secure Boot 状态。仅 ACPI 覆盖受这些条件限制，普通工具安装不要求关闭 Secure Boot。内核或 BIOS 已修复的问题不必再次打补丁。
+
+## 触控板灵敏度和振感
+
+```bash
 honor-touchpad --status
+honor-touchpad --gui
 ```
 
----
+`--status` 明确显示设备发现结果、保存的偏好和传输能力；保存值不是硬件回读。Linux 仅匹配 **I2C 27c6:0f9a**，不会误选 **USB 27c6:6f94 指纹设备**。
 
-## 🪟 Windows 平台使用方法
+原 Linux 程序发送的 `06 01 ...` 私有报文在仓库中没有协议或抓包依据。默认禁止发送；如需开发实验，必须显式传 `--experimental`，并通过 HID Output Report ID/长度校验。发送成功也不能证明灵敏度或振感已经生效。Linux GUI 不再提供无法实际控制的边缘手势开关。
 
-`touchpad_control.py` 经过特别优化，现已**完整支持 Windows 平台直接运行**：
+HID-BPF 源码保留供开发：它依赖未附带的头文件、兼容的内核 kfunc 和真正的 loader，当前安装器不声称已加载亮度手势。
 
-* **免装电脑管家**：无需在后台常驻体积庞大、包含众多守护进程的官方电脑管家。
-* **物理硬件直连**：双击项目根目录的 **`运行触控板设置.bat`**，即可弹出原生设置面板。拖动滑块或选择档位保存后，会立即同步硬件物理触发克数与马达振感。
-* **命令行调节**：
-  ```cmd
-  python touchBar/touchpad_control.py --sensitivity high --shock high
-  ```
+## 其他模块
 
+```bash
+# 仅在确有内置键盘无响应时启用控制器兼容参数
+sudo bash install.sh --module keyBoard -- --enable-dumbkbd
+
+# 检查/清理旧脚本强制安装的音频参数
+sudo bash install.sh --module audioCodec -- --remove-legacy-config
+
+# 检查电池内核接口，再显式启用 80% 上限
+honor-battery-limit --status
+sudo bash install.sh --module batteryCharge -- --enable --limit 80
+```
+
+音频默认依靠发行版内核、SOF 固件和 ALSA UCM；`alc256-asus-mic` 只作为检测到 ALC256 后的显式实验选项。指纹模块仅提供目标 USB 设备的本地会话权限；是否支持识别取决于 libfprint，安装规则不等于获得驱动。电池若没有内核导出的阈值接口，会明确返回“不支持”，不会通过猜测 EC/WMI 命令强行写入。
+
+模块详细说明：[键盘](keyBoard/README.md)、[音频](audioCodec/README.md)、[指纹](fingerPrint/README.md)、[电池](batteryCharge/README.md)。配置更改会尽量备份已有文件，重建启动文件失败会报错；不能保证所有 initramfs 镜像原子回滚。重启前检查模块输出及备份位置。
+
+## Windows
+
+双击 `运行触控板设置.bat`，或运行：
+
+```powershell
+python touchBar/touchpad_control.py --status
+python touchBar/touchpad_control.py --gui
+```
+
+Windows 设置依赖 **HONOR 电脑管家的 MagicTouchPadHelper.dll 和运行中的 MBAMainService**。这些导出函数通过 IPC 请求后台服务，不能保证移除电脑管家后仍可工作；仅写注册表也不代表硬件改变。工具不再把缺少 DLL/服务当作成功。状态检查不发送设置请求。
+
+## 开发验证
+
+```bash
+python3 -m unittest discover -s tests -v
+bash install.sh --dry-run
+```
+
+回归测试使用模拟设备/固件/文件系统，不写本机硬件。GitHub Actions 配置了 Fedora 44、Ubuntu 24.04、Debian 13、Arch 和 openSUSE 的容器静态检查及无硬件测试；容器检查无法验证启动链、触控板手感或指纹识别。真实 Linux 验证应保存安装前后的诊断报告，并在重启后检查 ACPI Table Upgrade、I2C-HID 枚举和输入事件。

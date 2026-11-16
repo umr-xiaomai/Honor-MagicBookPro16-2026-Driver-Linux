@@ -17,6 +17,8 @@
 *.service text eol=lf
 *.install text eol=lf
 *.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 
 # Binary files
 *.img binary

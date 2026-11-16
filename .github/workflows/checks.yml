@@ -1,0 +1,36 @@
+name: Linux checks
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:44
+            packages: dnf -y install python3 git ShellCheck
+          - image: ubuntu:24.04
+            packages: apt-get update && apt-get install -y python3 git shellcheck
+          - image: debian:13
+            packages: apt-get update && apt-get install -y python3 git shellcheck
+          - image: archlinux:base
+            packages: pacman -Syu --noconfirm python git shellcheck
+          - image: opensuse/tumbleweed:latest
+            packages: zypper --non-interactive install python3 git ShellCheck
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install check dependencies
+        run: ${{ matrix.packages }}
+      - uses: actions/checkout@v4
+      - name: Shell syntax and static checks
+        shell: bash
+        run: |
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+            shellcheck "$script"
+          done < <(find . -name '*.sh' -print0)
+      - name: Hardware-free regression tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Installation preview
+        run: bash install.sh --dry-run

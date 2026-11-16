@@ -39,3 +39,7 @@ __pycache__/
 env/
 venv/
 ENV/
+
+# Locally generated ACPI bundles are specific to one BIOS.
+touchBar/build/
+honor-diagnose*.json
