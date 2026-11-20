@@ -11,7 +11,7 @@ honor_audio_update_config() (
         cp -a -- "$target" "$backup"
         echo "Backup: $backup"
     fi
-    # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+    # shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
     cleanup_audio_config() {
         local status=$?
         set +e

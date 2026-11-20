@@ -9,7 +9,7 @@ jobs:
       matrix:
         include:
           - image: fedora:44
-            packages: dnf -y install python3 git ShellCheck
+            packages: dnf -y install python3 git ShellCheck gawk
           - image: ubuntu:24.04
             packages: apt-get update && apt-get install -y python3 git shellcheck
           - image: debian:13
@@ -22,14 +22,19 @@ jobs:
     steps:
       - name: Install check dependencies
         run: ${{ matrix.packages }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Shell syntax and static checks
         shell: bash
         run: |
-          while IFS= read -r -d '' script; do
+          set -euo pipefail
+          shopt -s globstar nullglob
+          scripts=(**/*.sh)
+          (( ${#scripts[@]} > 0 ))
+          for script in "${scripts[@]}"; do
+            echo "Checking $script"
             bash -n "$script"
-            shellcheck "$script"
-          done < <(find . -name '*.sh' -print0)
+            shellcheck -x "$script"
+          done
       - name: Hardware-free regression tests
         run: python3 -m unittest discover -s tests -v
       - name: Installation preview

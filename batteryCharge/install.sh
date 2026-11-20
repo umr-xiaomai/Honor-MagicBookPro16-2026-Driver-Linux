@@ -38,9 +38,9 @@ fi
 [[ $(uname -s) == Linux ]] || { echo 'This installer requires Linux.' >&2; exit 1; }
 (( EUID == 0 )) || { echo 'Run this installer with sudo.' >&2; exit 1; }
 if (( ENABLE )); then
-    command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || {
-        echo 'A running systemd system is required for --enable.' >&2; exit 1;
-    }
+    if ! command -v systemctl >/dev/null || [[ ! -d /run/systemd/system ]]; then
+        echo 'A running systemd system is required for --enable.' >&2; exit 1
+    fi
     bash "$HERE/honor-battery-limit.sh" --status
 fi
 install -d /usr/local/bin /etc/systemd/system

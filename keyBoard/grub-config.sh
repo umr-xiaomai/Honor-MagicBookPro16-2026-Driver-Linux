@@ -40,7 +40,7 @@ honor_keyboard_apply_grub_workaround() (
     backup="$config.honor-backup.$(date +%Y%m%d%H%M%S).$$"
     cp -pL -- "$config" "$backup"
     echo "Backup: $backup"
-    # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+    # shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
     cleanup_keyboard_config() {
         local status=$?
         set +e
